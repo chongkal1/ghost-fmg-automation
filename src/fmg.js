@@ -93,19 +93,33 @@ async function uploadFeaturedImage(page, imageUrl) {
   try {
     tmpPath = await downloadImage(imageUrl);
 
-    // Set up file chooser listener before clicking the upload button
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent("filechooser", { timeout: 10000 }),
-      page.click(sel.uploadButton),
-    ]);
+    // Step 1: Click "Upload Image" button to open the upload modal
+    console.log("[FMG] Opening upload modal");
+    await page.click(sel.uploadButton);
+    await page.waitForTimeout(1000);
 
-    await fileChooser.setFiles(tmpPath);
-    console.log("[FMG] Featured image uploaded");
+    // Step 2: Try to set files on the hidden file input inside the modal
+    const hasFileInput = await page.$('input[type="file"]');
+    if (hasFileInput) {
+      console.log("[FMG] Found hidden file input — setting file directly");
+      await hasFileInput.setInputFiles(tmpPath);
+    } else {
+      // Fallback: click the dropzone to trigger file chooser
+      console.log("[FMG] Clicking dropzone to trigger file chooser");
+      const [fileChooser] = await Promise.all([
+        page.waitForEvent("filechooser", { timeout: 10000 }),
+        page.click('text=Select Files to Upload'),
+      ]);
+      await fileChooser.setFiles(tmpPath);
+    }
 
-    // Wait a moment for the upload to process
-    await page.waitForTimeout(2000);
+    console.log("[FMG] Featured image uploaded — waiting for processing");
+    await page.waitForTimeout(3000);
+
+    // Close the modal if it's still open (click X or outside)
+    const closeBtn = await page.$('button:has-text("×"), button:has-text("Close"), .modal-close');
+    if (closeBtn) await closeBtn.click();
   } finally {
-    // Clean up temp file
     if (tmpPath && fs.existsSync(tmpPath)) {
       fs.unlinkSync(tmpPath);
     }
