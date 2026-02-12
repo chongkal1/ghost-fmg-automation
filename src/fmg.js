@@ -1,7 +1,6 @@
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
-const os = require("os");
 const config = require("./config");
 
 const SCREENSHOTS_DIR = path.join(__dirname, "..", "screenshots");
@@ -30,24 +29,15 @@ function formatDate(isoString) {
 }
 
 /**
- * Download an image URL to a temp file. Returns the local file path.
+ * Upload a featured image via the Filestack URL input.
+ *
+ * Flow:
+ * 1. Click "Upload Image" button → Filestack modal opens
+ * 2. Click "Link (URL)" sidebar tab
+ * 3. Paste the image URL into the input
+ * 4. Click the submit button
+ * 5. Wait for processing, then confirm upload
  */
-async function downloadImage(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download image: ${res.status} ${url}`);
-
-  const contentType = res.headers.get("content-type") || "";
-  let ext = ".jpg";
-  if (contentType.includes("png")) ext = ".png";
-  else if (contentType.includes("webp")) ext = ".webp";
-  else if (contentType.includes("gif")) ext = ".gif";
-
-  const buffer = Buffer.from(await res.arrayBuffer());
-  const tmpPath = path.join(os.tmpdir(), `fmg-upload-${Date.now()}${ext}`);
-  fs.writeFileSync(tmpPath, buffer);
-  console.log(`[FMG] Downloaded featured image to ${tmpPath} (${buffer.length} bytes)`);
-  return tmpPath;
-}
 
 /**
  * Two-step FMG login flow:
@@ -88,42 +78,43 @@ async function uploadFeaturedImage(page, imageUrl) {
   }
 
   const sel = config.fmg.selectors;
-  let tmpPath;
 
-  try {
-    tmpPath = await downloadImage(imageUrl);
+  // Step 1: Click "Upload Image" button to open Filestack modal
+  console.log("[FMG] Opening Filestack upload modal");
+  await page.click(sel.uploadButton);
+  await page.waitForSelector(".fsp-modal", { state: "visible", timeout: 10000 });
 
-    // Step 1: Click "Upload Image" button to open the upload modal
-    console.log("[FMG] Opening upload modal");
-    await page.click(sel.uploadButton);
-    await page.waitForTimeout(1000);
+  // Step 2: Click "Link (URL)" tab in the sidebar
+  console.log("[FMG] Switching to Link (URL) tab");
+  await page.click('div[title="Link (URL)"]');
+  await page.waitForSelector("input.fsp-url-source__input", { state: "visible", timeout: 5000 });
 
-    // Step 2: Try to set files on the hidden file input inside the modal
-    const hasFileInput = await page.$('input[type="file"]');
-    if (hasFileInput) {
-      console.log("[FMG] Found hidden file input — setting file directly");
-      await hasFileInput.setInputFiles(tmpPath);
-    } else {
-      // Fallback: click the dropzone to trigger file chooser
-      console.log("[FMG] Clicking dropzone to trigger file chooser");
-      const [fileChooser] = await Promise.all([
-        page.waitForEvent("filechooser", { timeout: 10000 }),
-        page.click('text=Select Files to Upload'),
-      ]);
-      await fileChooser.setFiles(tmpPath);
-    }
+  // Step 3: Paste the image URL
+  console.log(`[FMG] Entering image URL: ${imageUrl}`);
+  await page.fill("input.fsp-url-source__input", imageUrl);
 
-    console.log("[FMG] Featured image uploaded — waiting for processing");
+  // Step 4: Click submit button
+  await page.click("button.fsp-url-source__submit-button");
+  console.log("[FMG] URL submitted — waiting for processing");
+  await page.waitForTimeout(3000);
+
+  // Step 5: Click "Upload" / confirm button if present
+  const uploadConfirm = await page.$('.fsp-button--primary:not(.fsp-button--disabled)');
+  if (uploadConfirm) {
+    console.log("[FMG] Clicking upload confirm button");
+    await uploadConfirm.click();
     await page.waitForTimeout(3000);
-
-    // Close the modal if it's still open (click X or outside)
-    const closeBtn = await page.$('button:has-text("×"), button:has-text("Close"), .modal-close');
-    if (closeBtn) await closeBtn.click();
-  } finally {
-    if (tmpPath && fs.existsSync(tmpPath)) {
-      fs.unlinkSync(tmpPath);
-    }
   }
+
+  // Wait for modal to close or close it manually
+  const modalStillOpen = await page.$(".fsp-modal");
+  if (modalStillOpen) {
+    const closeBtn = await page.$(".fsp-picker__close-button");
+    if (closeBtn) await closeBtn.click();
+    await page.waitForTimeout(1000);
+  }
+
+  console.log("[FMG] Featured image upload complete");
 }
 
 /**
