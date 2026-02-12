@@ -173,8 +173,12 @@ async function submitToFMG({ title, html, featureImage, publishedAt, metaDescrip
       window.tinymce.editors[0].setContent(content);
     }, html);
 
-    // 6. Upload featured image
-    await uploadFeaturedImage(page, featureImage);
+    // 6. Upload featured image (non-fatal — continue if upload fails)
+    try {
+      await uploadFeaturedImage(page, featureImage);
+    } catch (uploadErr) {
+      console.warn(`[FMG] Featured image upload failed (continuing): ${uploadErr.message}`);
+    }
 
     // 7. Fill summary (max 240 chars)
     if (metaDescription) {
