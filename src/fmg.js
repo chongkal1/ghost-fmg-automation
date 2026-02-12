@@ -1,6 +1,7 @@
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const config = require("./config");
 
 const SCREENSHOTS_DIR = path.join(__dirname, "..", "screenshots");
@@ -17,122 +18,104 @@ function screenshotPath(label) {
 }
 
 /**
- * Fill a rich text body field using the appropriate strategy.
- *
- * Strategies:
- *   tinymce        — use TinyMCE's JS API
- *   ckeditor       — use CKEditor 4/5 JS API
- *   contenteditable — find [contenteditable="true"] and set innerHTML
- *   plain          — standard page.fill() for <textarea>/<input>
- *   auto (default) — try each strategy in order until one works
+ * Format an ISO date string as MM/DD/YYYY for the FMG date input.
  */
-async function fillBody(page, selector, html) {
-  const strategy = config.fmg.bodyStrategy;
-
-  if (strategy === "tinymce" || strategy === "auto") {
-    const ok = await tryTinyMCE(page, html);
-    if (ok) return;
-    if (strategy === "tinymce") throw new Error("TinyMCE editor not found on page");
+function formatDate(isoString) {
+  if (!isoString) {
+    const now = new Date();
+    return `${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}/${now.getFullYear()}`;
   }
-
-  if (strategy === "ckeditor" || strategy === "auto") {
-    const ok = await tryCKEditor(page, html);
-    if (ok) return;
-    if (strategy === "ckeditor") throw new Error("CKEditor not found on page");
-  }
-
-  if (strategy === "contenteditable" || strategy === "auto") {
-    const ok = await tryContentEditable(page, selector, html);
-    if (ok) return;
-    if (strategy === "contenteditable")
-      throw new Error("No contenteditable element found for body selector");
-  }
-
-  // plain / final auto fallback
-  await page.fill(selector, html);
+  const d = new Date(isoString);
+  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
 }
 
-async function tryTinyMCE(page, html) {
-  return page.evaluate((content) => {
-    if (typeof window.tinymce === "undefined" || window.tinymce.editors.length === 0)
-      return false;
-    window.tinymce.editors[0].setContent(content);
-    return true;
-  }, html);
+/**
+ * Download an image URL to a temp file. Returns the local file path.
+ */
+async function downloadImage(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download image: ${res.status} ${url}`);
+
+  const contentType = res.headers.get("content-type") || "";
+  let ext = ".jpg";
+  if (contentType.includes("png")) ext = ".png";
+  else if (contentType.includes("webp")) ext = ".webp";
+  else if (contentType.includes("gif")) ext = ".gif";
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const tmpPath = path.join(os.tmpdir(), `fmg-upload-${Date.now()}${ext}`);
+  fs.writeFileSync(tmpPath, buffer);
+  console.log(`[FMG] Downloaded featured image to ${tmpPath} (${buffer.length} bytes)`);
+  return tmpPath;
 }
 
-async function tryCKEditor(page, html) {
-  return page.evaluate((content) => {
-    // CKEditor 4
-    if (typeof window.CKEDITOR !== "undefined" && window.CKEDITOR.instances) {
-      const names = Object.keys(window.CKEDITOR.instances);
-      if (names.length > 0) {
-        window.CKEDITOR.instances[names[0]].setData(content);
-        return true;
-      }
+/**
+ * Two-step FMG login flow:
+ * 1. Fill username, click "Next"
+ * 2. Wait for password field, fill password, click "Let's Go"
+ */
+async function login(page) {
+  const sel = config.fmg.selectors;
+
+  console.log(`[FMG] Navigating to ${config.fmg.loginUrl}`);
+  await page.goto(config.fmg.loginUrl, { waitUntil: "networkidle", timeout: 30000 });
+
+  // Step 1: Enter username and click Next
+  console.log("[FMG] Step 1: Filling username");
+  await page.fill(sel.username, config.fmg.username);
+  await page.click(sel.loginButton);
+
+  // Step 2: Wait for password field to appear, fill it, click login
+  console.log("[FMG] Step 2: Waiting for password field");
+  await page.waitForSelector(sel.password, { state: "visible", timeout: 15000 });
+  await page.fill(sel.password, config.fmg.password);
+  console.log("[FMG] Step 2: Clicking login button");
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 }),
+    page.click(sel.loginButton),
+  ]);
+
+  console.log("[FMG] Login complete");
+}
+
+/**
+ * Upload a featured image via the FMG file chooser.
+ */
+async function uploadFeaturedImage(page, imageUrl) {
+  if (!imageUrl) {
+    console.log("[FMG] No featured image — skipping upload");
+    return;
+  }
+
+  const sel = config.fmg.selectors;
+  let tmpPath;
+
+  try {
+    tmpPath = await downloadImage(imageUrl);
+
+    // Set up file chooser listener before clicking the upload button
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent("filechooser", { timeout: 10000 }),
+      page.click(sel.uploadButton),
+    ]);
+
+    await fileChooser.setFiles(tmpPath);
+    console.log("[FMG] Featured image uploaded");
+
+    // Wait a moment for the upload to process
+    await page.waitForTimeout(2000);
+  } finally {
+    // Clean up temp file
+    if (tmpPath && fs.existsSync(tmpPath)) {
+      fs.unlinkSync(tmpPath);
     }
-    // CKEditor 5 — look for the editor instance on the element
-    const ck5El = document.querySelector(".ck-editor__editable");
-    if (ck5El && ck5El.ckeditorInstance) {
-      ck5El.ckeditorInstance.setData(content);
-      return true;
-    }
-    return false;
-  }, html);
-}
-
-async function tryContentEditable(page, selector, html) {
-  // Try the configured selector first — it might point to a contenteditable
-  const found = await page.evaluate(
-    ({ sel, content }) => {
-      let el = document.querySelector(sel);
-      if (el && el.getAttribute("contenteditable") === "true") {
-        el.innerHTML = content;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        return true;
-      }
-      // Fallback: find the first non-body contenteditable
-      const editables = document.querySelectorAll('[contenteditable="true"]');
-      for (const e of editables) {
-        if (e.tagName !== "BODY") {
-          e.innerHTML = content;
-          e.dispatchEvent(new Event("input", { bubbles: true }));
-          return true;
-        }
-      }
-      return false;
-    },
-    { sel: selector, content: html }
-  );
-  return found;
+  }
 }
 
 /**
  * Check page for submission success or failure indicators.
  */
 async function validateSubmission(page) {
-  const { success, error } = config.fmg.selectors;
-
-  // Explicit error selector check
-  if (error) {
-    const errorEl = await page.$(error);
-    if (errorEl) {
-      const text = await errorEl.textContent();
-      throw new Error(`Submission failed — error element found: ${text.trim()}`);
-    }
-  }
-
-  // Explicit success selector check
-  if (success) {
-    const successEl = await page.$(success);
-    if (successEl) {
-      console.log("[FMG] Success indicator found on page");
-      return;
-    }
-    console.warn("[FMG] Warning: success selector configured but not found on page");
-  }
-
-  // Fallback: scan page text for common error keywords
   const bodyText = await page.evaluate(() => document.body.innerText);
   const errorPatterns = [
     /\berror\b/i,
@@ -148,69 +131,87 @@ async function validateSubmission(page) {
       console.warn(
         `[FMG] Warning: page contains "${match[0]}" — submission may have failed. Check the screenshot.`
       );
-      return; // warn once, don't throw
+      return;
     }
   }
 
   console.log("[FMG] No error indicators detected on page");
 }
 
-async function submitToFMG({ title, html }) {
+async function submitToFMG({ title, html, featureImage, publishedAt, metaDescription }) {
   ensureScreenshotsDir();
 
   console.log(`[FMG] Starting submission for: "${title}"`);
 
   const browser = await chromium.launch({ headless: config.headless });
   const page = await browser.newPage();
+  const sel = config.fmg.selectors;
 
   try {
-    // 1. Navigate to login page
-    console.log(`[FMG] Navigating to ${config.fmg.loginUrl}`);
-    await page.goto(config.fmg.loginUrl, { waitUntil: "networkidle", timeout: 30000 });
+    // 1. Login (two-step)
+    await login(page);
 
-    // 2. Fill login credentials
-    console.log("[FMG] Filling login credentials");
-    await page.fill(config.fmg.selectors.username, config.fmg.username);
-    await page.fill(config.fmg.selectors.password, config.fmg.password);
-
-    // 3. Click login and wait for navigation
-    console.log("[FMG] Clicking login button");
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "networkidle", timeout: 30000 }),
-      page.click(config.fmg.selectors.loginButton),
-    ]);
-    console.log("[FMG] Login complete");
-
-    // 4. Navigate to submission page
+    // 2. Navigate to blog add page
     console.log(`[FMG] Navigating to ${config.fmg.targetUrl}`);
     await page.goto(config.fmg.targetUrl, { waitUntil: "networkidle", timeout: 30000 });
 
-    // 5. Fill in the article title
-    console.log("[FMG] Filling title field");
-    await page.fill(config.fmg.selectors.title, title);
+    // 3. Fill title
+    console.log("[FMG] Filling title");
+    await page.fill(sel.title, title);
 
-    // 6. Fill in the article body (handles rich text editors)
-    console.log(`[FMG] Filling body field (strategy: ${config.fmg.bodyStrategy})`);
-    await fillBody(page, config.fmg.selectors.body, html);
+    // 4. Set post date (MM/DD/YYYY)
+    const dateStr = formatDate(publishedAt);
+    console.log(`[FMG] Setting post date: ${dateStr}`);
+    await page.click(sel.displayDate, { clickCount: 3 }); // select all existing text
+    await page.keyboard.press("Backspace");
+    await page.type(sel.displayDate, dateStr);
 
-    // 7. Click submit
-    console.log("[FMG] Clicking submit button");
-    await page.click(config.fmg.selectors.submit);
+    // 5. Fill body via TinyMCE
+    console.log("[FMG] Filling body via TinyMCE");
+    await page.waitForFunction(() => typeof window.tinymce !== "undefined" && window.tinymce.editors.length > 0, { timeout: 15000 });
+    await page.evaluate((content) => {
+      window.tinymce.editors[0].setContent(content);
+    }, html);
 
-    // 8. Wait for the page to settle after submission
+    // 6. Upload featured image
+    await uploadFeaturedImage(page, featureImage);
+
+    // 7. Fill summary (max 240 chars)
+    if (metaDescription) {
+      const summary = metaDescription.slice(0, 240);
+      console.log(`[FMG] Filling summary (${summary.length} chars)`);
+      await page.fill(sel.summary, summary);
+    }
+
+    // 8. Fill SEO Title Tag (max 100 chars)
+    const seoTitle = title.slice(0, 100);
+    console.log(`[FMG] Filling SEO title tag`);
+    await page.fill(sel.seoTitle, seoTitle);
+
+    // 9. Fill SEO Description Tag (max 280 chars)
+    if (metaDescription) {
+      const seoDesc = metaDescription.slice(0, 280);
+      console.log(`[FMG] Filling SEO description tag (${seoDesc.length} chars)`);
+      await page.fill(sel.seoDescription, seoDesc);
+    }
+
+    // 10. Click Publish
+    console.log("[FMG] Clicking Publish");
+    await page.click(sel.publish);
+
+    // 11. Wait for page to settle
     await page.waitForLoadState("networkidle", { timeout: 30000 });
 
-    // 9. Validate submission result
+    // 12. Validate submission
     await validateSubmission(page);
 
-    // 10. Screenshot for audit trail
+    // 13. Screenshot for audit trail
     const successShot = screenshotPath("success");
     await page.screenshot({ path: successShot, fullPage: true });
     console.log(`[FMG] Success screenshot saved: ${successShot}`);
 
     console.log(`[FMG] Submission complete for: "${title}"`);
   } catch (err) {
-    // Screenshot on error for debugging
     const errorShot = screenshotPath("error");
     await page.screenshot({ path: errorShot, fullPage: true }).catch(() => {});
     console.error(`[FMG] Error screenshot saved: ${errorShot}`);

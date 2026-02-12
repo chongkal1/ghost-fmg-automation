@@ -1,7 +1,7 @@
 const config = require("./config");
 
 async function fetchPost(postId) {
-  const url = `${config.ghost.apiUrl}/ghost/api/content/posts/${postId}/?key=${config.ghost.contentApiKey}&formats=html`;
+  const url = `${config.ghost.apiUrl}/ghost/api/content/posts/${postId}/?key=${config.ghost.contentApiKey}&formats=html&include=authors`;
 
   console.log(`[Ghost] Fetching post ${postId}`);
 
@@ -21,7 +21,15 @@ async function fetchPost(postId) {
 
   console.log(`[Ghost] Fetched: "${post.title}"`);
 
-  return { title: post.title, html: post.html };
+  const summary = post.meta_description || post.custom_excerpt || "";
+
+  return {
+    title: post.title,
+    html: post.html,
+    featureImage: post.feature_image || null,
+    publishedAt: post.published_at || null,
+    metaDescription: summary,
+  };
 }
 
 module.exports = { fetchPost };

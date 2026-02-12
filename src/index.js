@@ -27,11 +27,11 @@ app.post("/webhook/ghost", async (req, res) => {
 
     log(`Processing post ${postId}`);
 
-    const { title, html } = await fetchPost(postId);
-    await submitToFMG({ title, html });
+    const post = await fetchPost(postId);
+    await submitToFMG(post);
 
-    log(`Successfully submitted "${title}" to FMG Suite`);
-    res.json({ success: true, title });
+    log(`Successfully submitted "${post.title}" to FMG Suite`);
+    res.json({ success: true, title: post.title });
   } catch (err) {
     log(`Error: ${err.message}`);
     console.error(err);
