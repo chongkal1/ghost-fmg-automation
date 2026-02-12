@@ -17,6 +17,19 @@ function screenshotPath(label) {
 }
 
 /**
+ * Take a numbered debug screenshot and log the step.
+ */
+let stepCounter = 0;
+async function debugScreenshot(page, label) {
+  stepCounter++;
+  const num = String(stepCounter).padStart(2, "0");
+  const filename = `step-${num}-${label}`;
+  const filePath = screenshotPath(filename);
+  await page.screenshot({ path: filePath, fullPage: true });
+  console.log(`[FMG] Step ${num}: ${label} — screenshot: ${filePath}`);
+}
+
+/**
  * Format an ISO date string as MM/DD/YYYY for the FMG date input.
  */
 function formatDate(isoString) {
@@ -27,17 +40,6 @@ function formatDate(isoString) {
   const d = new Date(isoString);
   return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
 }
-
-/**
- * Upload a featured image via the Filestack URL input.
- *
- * Flow:
- * 1. Click "Upload Image" button → Filestack modal opens
- * 2. Click "Link (URL)" sidebar tab
- * 3. Paste the image URL into the input
- * 4. Click the submit button
- * 5. Wait for processing, then confirm upload
- */
 
 /**
  * Two-step FMG login flow:
@@ -69,7 +71,94 @@ async function login(page) {
 }
 
 /**
- * Upload a featured image via the FMG file chooser.
+ * Select author from the MUI Select dropdown.
+ */
+async function selectAuthor(page) {
+  const sel = config.fmg.selectors;
+  const authorValue = config.fmg.authorValue;
+
+  if (!authorValue) {
+    console.log("[FMG] No author value configured — skipping author selection");
+    return;
+  }
+
+  console.log(`[FMG] Selecting author (value: ${authorValue})`);
+
+  // Find the MUI Select trigger near the author input
+  // The authorSelect points to the hidden input; we need to click the adjacent MUI Select div
+  const authorInput = await page.$(sel.authorSelect);
+  if (!authorInput) {
+    console.warn("[FMG] Author input not found — trying fallback selector");
+    // Fallback: try clicking any MuiSelect-select on the page
+    const muiSelect = await page.$("div.MuiSelect-select");
+    if (muiSelect) {
+      await muiSelect.click();
+    } else {
+      console.warn("[FMG] No author dropdown found — skipping");
+      return;
+    }
+  } else {
+    // Click the parent MUI Select div (sibling of the hidden input)
+    const parentSelect = await page.evaluateHandle((input) => {
+      // Walk up to find the MuiSelect-select element
+      let el = input.parentElement;
+      while (el) {
+        const selectDiv = el.querySelector("div.MuiSelect-select");
+        if (selectDiv) return selectDiv;
+        el = el.parentElement;
+      }
+      return null;
+    }, authorInput);
+
+    if (parentSelect && await parentSelect.evaluate(el => el !== null)) {
+      await parentSelect.click();
+    } else {
+      // Direct fallback: click the first MuiSelect-select
+      await page.click("div.MuiSelect-select");
+    }
+  }
+
+  // Wait for the dropdown menu to appear
+  await page.waitForSelector("ul.MuiMenu-list, ul.MuiList-root", { state: "visible", timeout: 5000 });
+  console.log("[FMG] Author dropdown opened");
+
+  // Click the specific author option
+  const optionSelector = `li[data-value="${authorValue}"]`;
+  const option = await page.$(optionSelector);
+  if (option) {
+    await option.click();
+    console.log("[FMG] Author option clicked");
+  } else {
+    // Fallback: try to find by text content
+    console.warn(`[FMG] Author option ${optionSelector} not found — trying text match`);
+    const menuItems = await page.$$("li.MuiMenuItem-root");
+    for (const item of menuItems) {
+      const text = await item.textContent();
+      if (text.includes("Brent") || text.includes("Rupnow")) {
+        await item.click();
+        console.log(`[FMG] Author selected by text: ${text}`);
+        break;
+      }
+    }
+  }
+
+  // Wait for dropdown to close
+  await page.waitForSelector("ul.MuiMenu-list, ul.MuiList-root", { state: "hidden", timeout: 5000 }).catch(() => {});
+  console.log("[FMG] Author selection complete");
+}
+
+/**
+ * Upload a featured image via the Filestack URL input.
+ *
+ * Flow:
+ * 1. Click "Upload Image" button → Filestack modal opens
+ * 2. Click "Link (URL)" sidebar tab
+ * 3. Paste the image URL into the input
+ * 4. Click the submit button
+ * 5. Wait for image to load and become selected
+ * 6. Click "View/Edit Selected" button
+ * 7. Click final "Upload" button on the edit screen
+ * 8. Wait for modal to close
  */
 async function uploadFeaturedImage(page, imageUrl) {
   if (!imageUrl) {
@@ -83,38 +172,88 @@ async function uploadFeaturedImage(page, imageUrl) {
   console.log("[FMG] Opening Filestack upload modal");
   await page.click(sel.uploadButton);
   await page.waitForSelector(".fsp-modal", { state: "visible", timeout: 10000 });
+  await debugScreenshot(page, "modal-opened");
 
   // Step 2: Click "Link (URL)" tab in the sidebar
   console.log("[FMG] Switching to Link (URL) tab");
   await page.click('div[title="Link (URL)"]');
   await page.waitForSelector("input.fsp-url-source__input", { state: "visible", timeout: 5000 });
+  await debugScreenshot(page, "url-tab-clicked");
 
   // Step 3: Paste the image URL
   console.log(`[FMG] Entering image URL: ${imageUrl}`);
   await page.fill("input.fsp-url-source__input", imageUrl);
+  await debugScreenshot(page, "url-filled");
 
   // Step 4: Click submit button
+  console.log("[FMG] Clicking URL submit button");
   await page.click("button.fsp-url-source__submit-button");
-  console.log("[FMG] URL submitted — waiting for processing");
+  await debugScreenshot(page, "url-submitted");
+
+  // Step 5: Wait for the image to load — look for "Selected" indicator or button to become enabled
+  console.log("[FMG] Waiting for image to load...");
   await page.waitForTimeout(3000);
 
-  // Step 5: Click "Upload" / confirm button if present
-  const uploadConfirm = await page.$('.fsp-button--primary:not(.fsp-button--disabled)');
-  if (uploadConfirm) {
-    console.log("[FMG] Clicking upload confirm button");
-    await uploadConfirm.click();
-    await page.waitForTimeout(3000);
+  // Check for various indicators that the file has been selected
+  try {
+    await page.waitForFunction(() => {
+      // Check if "View/Edit Selected" button is enabled
+      const primaryBtn = document.querySelector(".fsp-button--primary:not(.fsp-button--disabled)");
+      if (primaryBtn) return true;
+      // Check for selected files text
+      const bodyText = document.body.innerText;
+      if (bodyText.includes("Selected") || bodyText.includes("selected")) return true;
+      // Check for thumbnail
+      const thumb = document.querySelector(".fsp-grid__cell, .fsp-source-list__item");
+      if (thumb) return true;
+      return false;
+    }, { timeout: 10000 });
+    console.log("[FMG] Image appears to be loaded/selected");
+  } catch {
+    console.warn("[FMG] Timeout waiting for image selection indicator — continuing anyway");
+  }
+  await debugScreenshot(page, "image-loaded");
+
+  // Step 6: Click "View/Edit Selected" / primary action button
+  const viewEditBtn = await page.$(".fsp-button--primary:not(.fsp-button--disabled)");
+  if (viewEditBtn) {
+    const btnText = await viewEditBtn.textContent();
+    console.log(`[FMG] Clicking primary button: "${btnText.trim()}"`);
+    await viewEditBtn.click();
+    await page.waitForTimeout(2000);
+    await debugScreenshot(page, "view-edit-clicked");
+
+    // Step 7: Look for a final "Upload" button on the edit/crop screen
+    const uploadBtn = await page.$(".fsp-button--primary:not(.fsp-button--disabled)");
+    if (uploadBtn) {
+      const uploadBtnText = await uploadBtn.textContent();
+      console.log(`[FMG] Clicking final button: "${uploadBtnText.trim()}"`);
+      await uploadBtn.click();
+      console.log("[FMG] Final upload button clicked — waiting for modal to close");
+    }
+  } else {
+    console.warn("[FMG] No primary button found — trying direct upload confirm");
+    // Fallback: try any upload/confirm button
+    const anyBtn = await page.$('button[class*="upload"], button[class*="confirm"]');
+    if (anyBtn) {
+      await anyBtn.click();
+    }
   }
 
-  // Wait for modal to close or close it manually
-  const modalStillOpen = await page.$(".fsp-modal");
-  if (modalStillOpen) {
+  // Step 8: Wait for modal to close (indicates upload complete)
+  try {
+    await page.waitForSelector(".fsp-modal", { state: "hidden", timeout: 15000 });
+    console.log("[FMG] Filestack modal closed — upload complete");
+  } catch {
+    console.warn("[FMG] Filestack modal did not close — attempting manual close");
     const closeBtn = await page.$(".fsp-picker__close-button");
-    if (closeBtn) await closeBtn.click();
-    await page.waitForTimeout(1000);
+    if (closeBtn) {
+      await closeBtn.click();
+      await page.waitForTimeout(1000);
+    }
   }
 
-  console.log("[FMG] Featured image upload complete");
+  console.log("[FMG] Featured image upload flow complete");
 }
 
 /**
@@ -145,6 +284,7 @@ async function validateSubmission(page) {
 
 async function submitToFMG({ title, html, featureImage, publishedAt, metaDescription }) {
   ensureScreenshotsDir();
+  stepCounter = 0; // Reset step counter for each submission
 
   console.log(`[FMG] Starting submission for: "${title}"`);
 
@@ -155,69 +295,86 @@ async function submitToFMG({ title, html, featureImage, publishedAt, metaDescrip
   try {
     // 1. Login (two-step)
     await login(page);
+    await debugScreenshot(page, "after-login");
 
     // 2. Navigate to blog add page
     console.log(`[FMG] Navigating to ${config.fmg.targetUrl}`);
     await page.goto(config.fmg.targetUrl, { waitUntil: "networkidle", timeout: 30000 });
+    await debugScreenshot(page, "form-loaded");
 
     // 3. Fill title
     console.log("[FMG] Filling title");
     await page.fill(sel.title, title);
+    await debugScreenshot(page, "title-filled");
 
-    // 4. Set post date (MM/DD/YYYY)
+    // 4. Select author (NEW)
+    try {
+      await selectAuthor(page);
+      await debugScreenshot(page, "author-selected");
+    } catch (authorErr) {
+      console.warn(`[FMG] Author selection failed (continuing): ${authorErr.message}`);
+      await debugScreenshot(page, "author-failed");
+    }
+
+    // 5. Set post date (MM/DD/YYYY)
     const dateStr = formatDate(publishedAt);
     console.log(`[FMG] Setting post date: ${dateStr}`);
     await page.click(sel.displayDate, { clickCount: 3 }); // select all existing text
     await page.keyboard.press("Backspace");
     await page.type(sel.displayDate, dateStr);
+    await debugScreenshot(page, "date-filled");
 
-    // 5. Fill body via TinyMCE
+    // 6. Fill body via TinyMCE
     console.log("[FMG] Filling body via TinyMCE");
     await page.waitForFunction(() => typeof window.tinymce !== "undefined" && window.tinymce.editors.length > 0, { timeout: 15000 });
     await page.evaluate((content) => {
       window.tinymce.editors[0].setContent(content);
     }, html);
+    await debugScreenshot(page, "body-filled");
 
-    // 6. Upload featured image (non-fatal — continue if upload fails)
+    // 7. Upload featured image (non-fatal — continue if upload fails)
     try {
       await uploadFeaturedImage(page, featureImage);
+      await debugScreenshot(page, "upload-confirmed");
     } catch (uploadErr) {
       console.warn(`[FMG] Featured image upload failed (continuing): ${uploadErr.message}`);
+      await debugScreenshot(page, "upload-failed");
     }
 
-    // 7. Fill summary (max 240 chars)
+    // 8. Fill summary (max 240 chars)
     if (metaDescription) {
       const summary = metaDescription.slice(0, 240);
       console.log(`[FMG] Filling summary (${summary.length} chars)`);
       await page.fill(sel.summary, summary);
     }
+    await debugScreenshot(page, "summary-filled");
 
-    // 8. Fill SEO Title Tag (max 100 chars)
+    // 9. Fill SEO Title Tag (max 100 chars)
     const seoTitle = title.slice(0, 100);
     console.log(`[FMG] Filling SEO title tag`);
     await page.fill(sel.seoTitle, seoTitle);
 
-    // 9. Fill SEO Description Tag (max 280 chars)
+    // 10. Fill SEO Description Tag (max 280 chars)
     if (metaDescription) {
       const seoDesc = metaDescription.slice(0, 280);
       console.log(`[FMG] Filling SEO description tag (${seoDesc.length} chars)`);
       await page.fill(sel.seoDescription, seoDesc);
     }
+    await debugScreenshot(page, "seo-filled");
 
-    // 10. Click Publish
+    // 11. Click Publish
     console.log("[FMG] Clicking Publish");
+    await debugScreenshot(page, "before-publish");
     await page.click(sel.publish);
 
-    // 11. Wait for page to settle
+    // 12. Wait for page to settle
     await page.waitForLoadState("networkidle", { timeout: 30000 });
 
-    // 12. Validate submission
+    // 13. Validate submission
     await validateSubmission(page);
 
-    // 13. Screenshot for audit trail
-    const successShot = screenshotPath("success");
-    await page.screenshot({ path: successShot, fullPage: true });
-    console.log(`[FMG] Success screenshot saved: ${successShot}`);
+    // 14. Final screenshot
+    await debugScreenshot(page, "after-publish");
 
     console.log(`[FMG] Submission complete for: "${title}"`);
   } catch (err) {
