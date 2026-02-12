@@ -156,9 +156,10 @@ async function selectAuthor(page) {
  * 3. Paste the image URL into the input
  * 4. Click the submit button
  * 5. Wait for image to load and become selected
- * 6. Click "View/Edit Selected" button
- * 7. Click final "Upload" button on the edit screen
- * 8. Wait for modal to close
+ * 6. Click "Upload N" button to enter crop/edit screen
+ * 7. Click "Save" on the crop screen
+ * 8. Click final "Upload" button
+ * 9. Wait for modal to close
  */
 async function uploadFeaturedImage(page, imageUrl) {
   if (!imageUrl) {
@@ -214,35 +215,44 @@ async function uploadFeaturedImage(page, imageUrl) {
   }
   await debugScreenshot(page, "image-loaded");
 
-  // Step 6: Click "View/Edit Selected" / primary action button
-  const viewEditBtn = await page.$(".fsp-button--primary:not(.fsp-button--disabled)");
-  if (viewEditBtn) {
-    const btnText = await viewEditBtn.textContent();
+  // Step 6: Click "Upload N" primary button to enter crop/edit screen
+  const uploadNBtn = await page.$(".fsp-button--primary:not(.fsp-button--disabled)");
+  if (uploadNBtn) {
+    const btnText = await uploadNBtn.textContent();
     console.log(`[FMG] Clicking primary button: "${btnText.trim()}"`);
-    await viewEditBtn.click();
-    await page.waitForTimeout(2000);
-    await debugScreenshot(page, "view-edit-clicked");
-
-    // Step 7: Look for a final "Upload" button on the edit/crop screen
-    const uploadBtn = await page.$(".fsp-button--primary:not(.fsp-button--disabled)");
-    if (uploadBtn) {
-      const uploadBtnText = await uploadBtn.textContent();
-      console.log(`[FMG] Clicking final button: "${uploadBtnText.trim()}"`);
-      await uploadBtn.click();
-      console.log("[FMG] Final upload button clicked — waiting for modal to close");
-    }
+    await uploadNBtn.click();
   } else {
-    console.warn("[FMG] No primary button found — trying direct upload confirm");
-    // Fallback: try any upload/confirm button
-    const anyBtn = await page.$('button[class*="upload"], button[class*="confirm"]');
-    if (anyBtn) {
-      await anyBtn.click();
-    }
+    console.warn("[FMG] No primary button found after image load — skipping");
   }
 
-  // Step 8: Wait for modal to close (indicates upload complete)
+  // Step 7: Wait for crop/edit screen, then click "Save"
+  console.log("[FMG] Waiting for crop/edit screen...");
+  await page.waitForSelector('span.fsp-button--outline[title="Save"]', { state: "visible", timeout: 10000 });
+  await debugScreenshot(page, "crop-screen");
+  console.log('[FMG] Clicking "Save" on crop screen');
+  await page.click('span.fsp-button--outline[title="Save"]');
+
+  // Step 8: Wait for final "Upload" button and click it
+  console.log("[FMG] Waiting for final Upload button...");
+  await page.waitForTimeout(2000);
+  // After Save, the button changes to a final "Upload" — it reuses .fsp-button--primary
   try {
-    await page.waitForSelector(".fsp-modal", { state: "hidden", timeout: 15000 });
+    await page.waitForSelector(".fsp-button--primary:not(.fsp-button--disabled)", { state: "visible", timeout: 10000 });
+    await debugScreenshot(page, "final-upload-ready");
+    const finalUploadBtn = await page.$(".fsp-button--primary:not(.fsp-button--disabled)");
+    if (finalUploadBtn) {
+      const finalText = await finalUploadBtn.textContent();
+      console.log(`[FMG] Clicking final button: "${finalText.trim()}"`);
+      await finalUploadBtn.click();
+      console.log("[FMG] Final Upload clicked — waiting for modal to close");
+    }
+  } catch {
+    console.warn("[FMG] Final Upload button not found — trying Save fallback");
+  }
+
+  // Step 9: Wait for modal to close (indicates upload complete)
+  try {
+    await page.waitForSelector(".fsp-modal", { state: "hidden", timeout: 20000 });
     console.log("[FMG] Filestack modal closed — upload complete");
   } catch {
     console.warn("[FMG] Filestack modal did not close — attempting manual close");
