@@ -372,18 +372,24 @@ async function submitToFMG({ title, html, featureImage, publishedAt, metaDescrip
     }
     await debugScreenshot(page, "seo-filled");
 
-    // 11. Click Publish
+    // 11. Disable search engine indexing
+    console.log("[FMG] Checking 'Disable search engine indexing' checkbox");
+    const indexingCheckbox = page.locator('[data-testid="qa-indexing-checkbox"]');
+    await indexingCheckbox.click();
+    await debugScreenshot(page, "indexing-disabled");
+
+    // 12. Click Publish
     console.log("[FMG] Clicking Publish");
     await debugScreenshot(page, "before-publish");
     await page.click(sel.publish);
 
-    // 12. Wait for page to settle
+    // 13. Wait for page to settle
     await page.waitForLoadState("networkidle", { timeout: 30000 });
 
-    // 13. Validate submission
+    // 14. Validate submission
     await validateSubmission(page);
 
-    // 14. Final screenshot
+    // 15. Final screenshot
     await debugScreenshot(page, "after-publish");
 
     console.log(`[FMG] Submission complete for: "${title}"`);
