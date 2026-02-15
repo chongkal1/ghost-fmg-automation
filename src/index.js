@@ -4,7 +4,7 @@ const { fetchPost } = require("./ghost");
 const { submitToFMG } = require("./fmg");
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
