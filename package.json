@@ -6,7 +6,12 @@
   "scripts": {
     "start": "node src/index.js",
     "test:ghost": "node scripts/test-ghost.js",
-    "debug:fmg": "node scripts/debug-fmg.js"
+    "debug:fmg": "node scripts/debug-fmg.js",
+    "seed": "node scripts/seed-from-ghost.js",
+    "seed:dry": "node scripts/seed-from-ghost.js --dry-run",
+    "dedup": "node scripts/dedup-fmg.js",
+    "dedup:dry": "node scripts/dedup-fmg.js --dry-run",
+    "dedup:headed": "node scripts/dedup-fmg.js --headed"
   },
   "keywords": [],
   "license": "ISC",

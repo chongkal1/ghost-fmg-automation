@@ -7,7 +7,7 @@ RUN npm ci --production
 
 COPY . .
 
-RUN mkdir -p screenshots
+RUN mkdir -p screenshots data
 
 EXPOSE 3000
 
