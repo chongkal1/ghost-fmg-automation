@@ -1,4 +1,5 @@
 const express = require("express");
+const cron = require("node-cron");
 const config = require("./config");
 const { fetchPost } = require("./ghost");
 const { submitToFMG } = require("./fmg");
@@ -130,4 +131,19 @@ app.listen(config.port, () => {
   log(`Health check:     GET  http://localhost:${config.port}/health`);
   const published = getPublished();
   log(`Tracked published articles: ${published.length}`);
+  const compliance = getCompliance();
+  log(`Tracked compliance articles: ${compliance.length}`);
 });
+
+// Weekly batch: Sunday at 2:00 AM UTC — submit 15 unfiled posts to FMG
+cron.schedule("0 2 * * 0", () => {
+  log("Cron triggered: weekly batch submit (15 posts)");
+  runBatchSubmit({ limit: 15 })
+    .then((result) => {
+      log(`Cron batch complete: ${result.submitted.length} submitted, ${result.failed.length} failed`);
+    })
+    .catch((err) => {
+      log(`Cron batch error: ${err.message}`);
+      console.error(err);
+    });
+}, { timezone: "UTC" });
