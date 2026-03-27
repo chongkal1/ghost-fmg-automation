@@ -3,6 +3,8 @@ const config = require("./config");
 const { fetchPost } = require("./ghost");
 const { submitToFMG } = require("./fmg");
 const { isPublished, markPublished, seedPublished, getPublished } = require("./published");
+const { getCompliance, seedCompliance } = require("./compliance");
+const { runBatchSubmit, getLatestResults } = require("./batch-submit");
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -32,6 +34,49 @@ app.post("/published/seed", (req, res) => {
   res.json(result);
 });
 
+// --- Compliance tracking ---
+app.get("/compliance", (_req, res) => {
+  const compliance = getCompliance();
+  res.json({ total: compliance.length, articles: compliance });
+});
+
+app.post("/compliance/seed", (req, res) => {
+  const articles = req.body?.articles;
+  if (!Array.isArray(articles)) {
+    return res.status(400).json({ error: "Body must contain an 'articles' array" });
+  }
+  const result = seedCompliance(articles);
+  log(`Seeded compliance list: ${result.added} new, ${result.total} total`);
+  res.json(result);
+});
+
+// --- Batch submission ---
+app.post("/batch-submit", (req, res) => {
+  const limit = parseInt(req.query.limit) || 15;
+  log(`Batch submit triggered (limit: ${limit})`);
+
+  // Respond immediately, run in background
+  res.status(202).json({ status: "started", limit });
+
+  runBatchSubmit({ limit })
+    .then((result) => {
+      log(`Batch complete: ${result.submitted.length} submitted, ${result.failed.length} failed`);
+    })
+    .catch((err) => {
+      log(`Batch error: ${err.message}`);
+      console.error(err);
+    });
+});
+
+app.get("/batch-status", (_req, res) => {
+  const results = getLatestResults();
+  if (!results) {
+    return res.json({ status: "no_runs" });
+  }
+  res.json(results);
+});
+
+// --- Ghost webhook ---
 app.post("/webhook/ghost", async (req, res) => {
   log("Received Ghost webhook");
 

@@ -11,7 +11,10 @@
     "seed:dry": "node scripts/seed-from-ghost.js --dry-run",
     "dedup": "node scripts/dedup-fmg.js",
     "dedup:dry": "node scripts/dedup-fmg.js --dry-run",
-    "dedup:headed": "node scripts/dedup-fmg.js --headed"
+    "dedup:headed": "node scripts/dedup-fmg.js --headed",
+    "seed:compliance": "node scripts/seed-compliance.js",
+    "seed:compliance:dry": "node scripts/seed-compliance.js --dry-run",
+    "seed:compliance:headed": "node scripts/seed-compliance.js --headed"
   },
   "keywords": [],
   "license": "ISC",
