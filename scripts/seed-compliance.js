@@ -211,7 +211,7 @@ async function fetchGhostPosts() {
       return;
     }
 
-    // 3. All entries on FMG are already filed (Published = approved, In Compliance = pending approval)
+    // 3. Filter for "Published" status only — these have passed compliance
     const publishedEntries = allEntries.filter(
       (e) => e.status.toLowerCase().includes("published")
     );
@@ -220,9 +220,8 @@ async function fetchGhostPosts() {
     );
 
     console.log(`\nTotal FMG entries: ${allEntries.length}`);
-    console.log(`  Published (approved): ${publishedEntries.length}`);
-    console.log(`  In Compliance (pending approval): ${inComplianceEntries.length}`);
-    console.log(`  All will be marked as filed to prevent re-submission`);
+    console.log(`  Published (passed compliance): ${publishedEntries.length}`);
+    console.log(`  In Compliance (pending): ${inComplianceEntries.length}`);
 
     // 4. Fetch Ghost posts to match by title → get IDs
     console.log("\n--- Fetching Ghost posts for ID matching ---");
@@ -235,12 +234,12 @@ async function fetchGhostPosts() {
       ghostByTitle.set(gp.title.trim().toLowerCase(), gp.id);
     }
 
-    // 5. Match ALL FMG entries to Ghost IDs (both Published and In Compliance)
+    // 5. Match FMG Published entries to Ghost IDs
     const articles = [];
     let matched = 0;
     let unmatched = 0;
 
-    for (const entry of allEntries) {
+    for (const entry of publishedEntries) {
       const normalized = entry.title.trim().toLowerCase();
       const ghostId = ghostByTitle.get(normalized) || null;
 

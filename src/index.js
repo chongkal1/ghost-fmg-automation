@@ -3,7 +3,7 @@ const config = require("./config");
 const { fetchPost } = require("./ghost");
 const { submitToFMG } = require("./fmg");
 const { isPublished, markPublished, seedPublished, getPublished } = require("./published");
-const { getCompliance, seedCompliance } = require("./compliance");
+const { getCompliance, seedCompliance, resetCompliance } = require("./compliance");
 const { runBatchSubmit, getLatestResults } = require("./batch-submit");
 
 const app = express();
@@ -48,6 +48,12 @@ app.post("/compliance/seed", (req, res) => {
   const result = seedCompliance(articles);
   log(`Seeded compliance list: ${result.added} new, ${result.total} total`);
   res.json(result);
+});
+
+app.post("/compliance/reset", (_req, res) => {
+  resetCompliance();
+  log("Compliance list reset");
+  res.json({ status: "reset", total: 0 });
 });
 
 // --- Batch submission ---

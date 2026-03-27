@@ -72,4 +72,9 @@ function seedCompliance(articles) {
   return { total: existing.length, added };
 }
 
-module.exports = { getCompliance, isFiled, markFiled, seedCompliance };
+function resetCompliance() {
+  saveCompliance([]);
+  console.log("[Compliance] Reset — all entries cleared");
+}
+
+module.exports = { getCompliance, isFiled, markFiled, seedCompliance, resetCompliance };
