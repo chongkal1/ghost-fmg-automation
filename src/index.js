@@ -135,8 +135,8 @@ app.listen(config.port, () => {
   log(`Tracked compliance articles: ${compliance.length}`);
 });
 
-// Weekly batch: Sunday at 2:00 AM UTC — submit 15 unfiled posts to FMG
-cron.schedule("0 2 * * 0", () => {
+// Weekly batch: Monday at 5:00 AM PST (13:00 UTC) — submit 15 unfiled posts to FMG
+cron.schedule("0 13 * * 1", () => {
   log("Cron triggered: weekly batch submit (15 posts)");
   runBatchSubmit({ limit: 15 })
     .then((result) => {
