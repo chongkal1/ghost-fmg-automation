@@ -42,7 +42,7 @@ module.exports = {
       seoDescription: env("FMG_SEO_DESC_SELECTOR") || "textarea#descriptionTag",
       uploadButton: env("FMG_UPLOAD_SELECTOR") || 'button[data-test="qa-upload-button"]',
       authorSelect: env("FMG_AUTHOR_SELECTOR") || 'input[name="authorSelectedValue"]',
-      publish: env("FMG_PUBLISH_SELECTOR") || 'button[data-testid="qa-action-publish-button"]',
+      saveDraft: env("FMG_SAVE_DRAFT_SELECTOR") || 'button[data-testid="qa-action-save-draft-button"]',
     },
     authorValue: env("FMG_AUTHOR_VALUE") || "9cdb8806-f99d-473f-bc77-96e27fb2da64",
     bodyStrategy: env("FMG_BODY_STRATEGY") || "tinymce",

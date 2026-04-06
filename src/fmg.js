@@ -378,10 +378,10 @@ async function submitToFMG({ title, html, featureImage, publishedAt, metaDescrip
     await indexingCheckbox.click();
     await debugScreenshot(page, "indexing-disabled");
 
-    // 12. Click Publish
-    console.log("[FMG] Clicking Publish");
-    await debugScreenshot(page, "before-publish");
-    await page.click(sel.publish);
+    // 12. Click Save Draft
+    console.log("[FMG] Clicking Save Draft");
+    await debugScreenshot(page, "before-save-draft");
+    await page.click(sel.saveDraft);
 
     // 13. Wait for page to settle
     await page.waitForLoadState("networkidle", { timeout: 30000 });
@@ -390,9 +390,9 @@ async function submitToFMG({ title, html, featureImage, publishedAt, metaDescrip
     await validateSubmission(page);
 
     // 15. Final screenshot
-    await debugScreenshot(page, "after-publish");
+    await debugScreenshot(page, "after-save-draft");
 
-    console.log(`[FMG] Submission complete for: "${title}"`);
+    console.log(`[FMG] Save draft complete for: "${title}"`);
   } catch (err) {
     const errorShot = screenshotPath("error");
     await page.screenshot({ path: errorShot, fullPage: true }).catch(() => {});
